@@ -31,8 +31,11 @@ Ext.define("portfolio-item-defects", {
     _addSelector: function(){
         var portfolioItemType = this.getSetting('selectedPortfolioType');
         this.removeAll();
-        var cb = this.add({
+        this.selector = this.add({
             xtype: 'rallycombobox',
+            itemId: 'portfolio-item-selector',
+            fieldLabel: 'Portfolio Item',
+            labelAlign: 'right',
             storeConfig: {
                 model: portfolioItemType,
                 remoteFilter: false,
@@ -40,12 +43,13 @@ Ext.define("portfolio-item-defects", {
             },
             width: 300
         });
-        cb.on('change', this._fetchUserStories, this);
+        this.selector.on('change', this._fetchUserStories, this);
     },
     _showError: function(msg){
         Rally.ui.notify.Notifier.showError({message: msg});
     },
     _fetchUserStories: function(cb){
+        this.logger.log('_fetchUserStories', cb.getValue());
         var portfolioItem = cb.getRecord(),
             config = this._getUserStoryConfig(portfolioItem);
 
@@ -121,7 +125,9 @@ Ext.define("portfolio-item-defects", {
         this.logger.log('_getDefectConfig', query, filters.toString());
 
         return {
-            model: model,
+            models: ['defect'],
+            enableHierarchy: true,
+
             fetch: this.defectFetch,
             filters: filters,
             limit: 'Infinity',
@@ -150,29 +156,94 @@ Ext.define("portfolio-item-defects", {
         return this.portfolioItemTypes[0].TypePath.replace("PortfolioItem/","");
     },
     _displayGrid: function(storeConfig){
-
-        if (this.down('rallygrid')){
-            this.down('rallygrid').destroy();
+        var me = this;
+        if (this.down('rallygridboard')){
+            this.down('rallygridboard').destroy();
         }
 
-        this.add({
-            xtype: 'rallygrid',
-            storeConfig: storeConfig,
-            columnCfgs: this._getColumnCfgs()
+        var modelNames = ['defect'];
+        Ext.create('Rally.data.wsapi.TreeStoreBuilder').build(storeConfig).then({
+            success: function(store){
+                var gb = this.add({
+                    xtype: 'rallygridboard',
+                    context: this.getContext(),
+                    modelNames: modelNames,
+                    toggleState: 'grid',
+                    plugins: [{
+                        ptype: 'rallygridboardcustomfiltercontrol',
+                        headerPosition: 'right',
+                        filterControlConfig: {
+                            modelNames: modelNames,
+                            stateful: true,
+                            stateId: this.getContext().getScopedStateId('defect-grid-filter')
+                        },
+                        showOwnerFilter: false
+                    },{
+                        ptype: 'rallygridboardfieldpicker',
+                        headerPosition: 'right',
+                        modelNames: modelNames,
+                        stateful: true,
+                        stateId: this.getContext().getScopedStateId('defect-grid-columns')
+                    }],
+                    gridConfig: {
+                        store: store,
+                        storeConfig: {filters: storeConfig.filters },
+                        columnCfgs: this._getColumnCfgs()
+                    },
+                    height: this.getHeight(),
+                    listeners: {
+                        afterrender: me._moveSelector,
+                        beforedestroy: me._removeSelector,
+                        scope: me
+                    }
+                });
+
+            },
+            scope: this
         });
 
     },
+    _removeSelector: function(gb){
+        this.logger.log('_removeSelector', gb);
+        if (this.selector && this.selector.rendered) {
+            var parent = this.selector.up();
+            if(parent && parent.remove){
+                parent.remove(this.selector, false);
+            }
+        }
+    },
+    _moveSelector: function(gb){
+        this.logger.log('_moveSelector', gb);
+
+        var header = gb.getHeader();
+
+        if (header) {
+            header.getLeft().add(this.selector);
+        }
+    },
     _getColumnCfgs: function(){
         return [{
-            dataIndex: 'FormattedID',
-            text: 'ID'
-        },{
             dataIndex: 'Name',
             text: 'Name',
             flex: 1
         }, {
             dataIndex: 'State',
             text: 'State'
+        }, {
+            dataIndex: 'Requirement',
+            text: 'User Story'
+        }, {
+            dataIndex: 'Severity',
+            text: 'Severity'
+        }, {
+            dataIndex: 'Priority',
+            text: 'Priority'
+        }, {
+            dataIndex: 'OpenedDate',
+            text: 'Opened Date'
+        }, {
+            dataIndex: 'Project',
+            text: 'Project'
         }];
     },
     getSettingsFields: function(){
@@ -180,7 +251,7 @@ Ext.define("portfolio-item-defects", {
             name: 'selectedPortfolioType',
             xtype: 'rallycombobox',
             labelAlign: 'right',
-            labelWidth: 150,
+            labelWidth: 175,
             allowBlank: false,
             autoSelect: false,
             fieldLabel: 'Selected Portfolio Item Type',
@@ -199,7 +270,7 @@ Ext.define("portfolio-item-defects", {
             xtype: 'textarea',
             fieldLabel: 'Defect Query',
             labelAlign: 'right',
-            labelWidth: 150,
+            labelWidth: 175,
             name: 'defectQuery',
             anchor: '100%',
             cls: 'query-field',
