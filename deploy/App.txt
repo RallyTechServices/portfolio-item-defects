@@ -3,11 +3,11 @@
 <head>
     <title>Portfolio Item Defects</title>
     <!--  (c) 2015 Rally Software Development Corp.  All Rights Reserved. -->
-    <!--  Build Date: Tue Mar 15 2016 21:09:37 GMT-0400 (EDT) -->
+    <!--  Build Date: Fri Apr 01 2016 09:03:52 GMT-0600 (MDT) -->
     
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Tue Mar 15 2016 21:09:37 GMT-0400 (EDT)";
-        var CHECKSUM = 6169865713;
+        var APP_BUILD_DATE = "Fri Apr 01 2016 09:03:52 GMT-0600 (MDT)";
+        var CHECKSUM = 8167943253;
     </script>
     
     <script type="text/javascript" src="/apps/2.0/sdk.js"></script>
@@ -176,6 +176,70 @@ Ext.define('Rally.technicalservices.Logger',{
 
 });
 
+Ext.override(Ext.util.Filter,{
+    createFilterFn: function() {
+        var me       = this,
+            matcher  = me.createValueMatcher(),
+            property = !Ext.isArray(me.property) ? me.property.split(',') : me.property
+
+        return function(item) {
+            var hasmatch = false;
+            for(var i=0;i<property.length;i++) {
+                if(matcher.test(me.getRoot.call(me, item)[property[i]])) {
+                    hasmatch=true;
+                    break;
+                }
+            }
+            return matcher === null ? value === null : hasmatch;
+        };
+    }
+});
+
+
+Ext.override(Rally.ui.combobox.ComboBox, {
+
+    doLocalQuery: function(queryPlan) {
+        var me = this,
+            queryString = queryPlan.query;
+
+        // Create our filter when first needed
+        if (!me.queryFilter) {
+            // Create the filter that we will use during typing to filter the Store
+            me.queryFilter = new Ext.util.Filter({
+                id: me.id + '-query-filter',
+                anyMatch: true,
+                caseSensitive: false,
+                root: 'data',
+                property: me.filterProperties
+            });
+            me.store.addFilter(me.queryFilter, true);
+        }
+
+        // Querying by a string...
+        if (queryString || !queryPlan.forceAll) {
+            me.queryFilter.disabled = false;
+            me.queryFilter.setValue(me.enableRegEx ? new RegExp(queryString) : queryString);
+        }
+
+        // If forceAll being used, or no query string, disable the filter
+        else {
+            me.queryFilter.disabled = true;
+        }
+
+        // Filter the Store according to the updated filter
+        me.store.filter();
+
+        // Expand after adjusting the filter unless there are no matches
+        if (me.store.getCount()) {
+            me.expand();
+        } else {
+            me.collapse();
+        }
+
+        me.afterQuery(queryPlan);
+    }
+});
+
 Ext.define('Rally.technicalservices.Toolbox',{
     singleton: true,
     fetchWsapiRecords: function(config){
@@ -270,19 +334,43 @@ Ext.define("portfolio-item-defects", {
     _addSelector: function(){
         var portfolioItemType = this.getSetting('selectedPortfolioType');
         this.removeAll();
-        this.selector = this.add({
-            xtype: 'rallycombobox',
-            itemId: 'portfolio-item-selector',
-            fieldLabel: 'Portfolio Item',
-            labelAlign: 'right',
+
+        var cb = Ext.create('Rally.ui.combobox.ComboBox',{
             storeConfig: {
                 model: portfolioItemType,
+                fetch: ['FormattedID','ObjectID','Name'],
                 remoteFilter: false,
                 autoLoad: true
             },
-            width: 300
+            fieldLabel: 'Portfolio Item',
+            itemId: 'portfolio-item-selector',
+            allowNoEntry: true,
+            noEntryValue: null,
+            noEntryText: '-- All Portfolio Defects --',
+            margin: 10,
+            valueField: 'ObjectID',
+            displayField: 'FormattedID',
+            stateful: true,
+            stateId: 'cb-pi-selector',
+            width: 400,
+            listConfig: {
+                itemTpl: '<tpl if="Name">{FormattedID}: {Name}<tpl else>{FormattedID}</tpl>'
+            },
+            filterProperties: ['Name','FormattedID'],
+            fieldCls: 'pi-selector',
+            displayTpl: '<tpl for=".">' +
+            '<tpl if="Name">{[values["FormattedID"]]}: {[values["Name"]]}' +
+            '<tpl else>{[values["FormattedID"]]}</tpl>' +
+            '<tpl if="xindex < xcount">,</tpl>' +
+            '</tpl>'
         });
+        this.selector = this.add(cb);
+
         this.selector.on('change', this._fetchUserStories, this);
+
+        if (cb.getValue() === null){
+            this._fetchUserStories(cb);
+        }
     },
     _showError: function(msg){
         Rally.ui.notify.Notifier.showError({message: msg});
@@ -310,33 +398,35 @@ Ext.define("portfolio-item-defects", {
         var model = 'HierarchicalRequirement',
             idx = this._getPortfolioItemLevel(portfolioItem);
 
-        if (idx < 0){
-            //something's wrong
-        }
-
         var propertySegments = [this._getFeatureFieldName()];
         for (var i=0; i<idx; i++){
             propertySegments.push('Parent');
         }
         propertySegments.push('ObjectID');
 
+        if (idx < 0){
+            //something is wrong...
+        }
+
+        var operator = ">",
+            value = 0;
+
+        if (portfolioItem && portfolioItem.get('ObjectID') > 0){
+            operator = "=";
+            value = portfolioItem.get('ObjectID');
+        }
         var filters = [{
             property: propertySegments.join('.'),
-            value: portfolioItem.get('ObjectID')
+            operator: operator,
+            value: value
         }];
 
-        this.logger.log('_getUserStoryConfigs', model, idx, propertySegments, filters);
+        this.logger.log('_getUserStoryConfigs', portfolioItem, model, idx, propertySegments, filters);
         return {
             model: model,
             fetch: ['ObjectID','Defects'],
             filters: filters,
-            limit: 'Infinity',
-            listeners: {
-                scope: this,
-                load: function(records, operation){
-                    console.log('records', records, operation);
-                }
-            }
+            limit: 'Infinity'
         };
     },
     _getDefectConfig: function(userStories){
@@ -369,18 +459,13 @@ Ext.define("portfolio-item-defects", {
 
             fetch: this.defectFetch,
             filters: filters,
-            limit: 'Infinity',
-            listeners: {
-                scope: this,
-                load: function(records, operation){
-                    console.log('records', records, operation);
-                }
-            }
+            limit: 'Infinity'
         };
     },
-    _getPortfolioItemLevel: function(portfolioItem){
+    _getPortfolioItemLevel: function(){
+
         var idx = -1,
-            type = portfolioItem.get('_type').toLowerCase();
+            type = this.getSetting('selectedPortfolioType').toLowerCase();
 
         for (var i=0; i<this.portfolioItemTypes.length; i++){
             if (type === this.portfolioItemTypes[i].TypePath.toLowerCase()){
