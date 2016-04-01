@@ -31,19 +31,43 @@ Ext.define("portfolio-item-defects", {
     _addSelector: function(){
         var portfolioItemType = this.getSetting('selectedPortfolioType');
         this.removeAll();
-        this.selector = this.add({
-            xtype: 'rallycombobox',
-            itemId: 'portfolio-item-selector',
-            fieldLabel: 'Portfolio Item',
-            labelAlign: 'right',
+
+        var cb = Ext.create('Rally.ui.combobox.ComboBox',{
             storeConfig: {
                 model: portfolioItemType,
+                fetch: ['FormattedID','ObjectID','Name'],
                 remoteFilter: false,
                 autoLoad: true
             },
-            width: 300
+            fieldLabel: 'Portfolio Item',
+            itemId: 'portfolio-item-selector',
+            allowNoEntry: true,
+            noEntryValue: null,
+            noEntryText: '-- All Portfolio Defects --',
+            margin: 10,
+            valueField: 'ObjectID',
+            displayField: 'FormattedID',
+            stateful: true,
+            stateId: 'cb-pi-selector',
+            width: 400,
+            listConfig: {
+                itemTpl: '<tpl if="Name">{FormattedID}: {Name}<tpl else>{FormattedID}</tpl>'
+            },
+            filterProperties: ['Name','FormattedID'],
+            fieldCls: 'pi-selector',
+            displayTpl: '<tpl for=".">' +
+            '<tpl if="Name">{[values["FormattedID"]]}: {[values["Name"]]}' +
+            '<tpl else>{[values["FormattedID"]]}</tpl>' +
+            '<tpl if="xindex < xcount">,</tpl>' +
+            '</tpl>'
         });
+        this.selector = this.add(cb);
+
         this.selector.on('change', this._fetchUserStories, this);
+
+        if (cb.getValue() === null){
+            this._fetchUserStories(cb);
+        }
     },
     _showError: function(msg){
         Rally.ui.notify.Notifier.showError({message: msg});
@@ -71,33 +95,35 @@ Ext.define("portfolio-item-defects", {
         var model = 'HierarchicalRequirement',
             idx = this._getPortfolioItemLevel(portfolioItem);
 
-        if (idx < 0){
-            //something's wrong
-        }
-
         var propertySegments = [this._getFeatureFieldName()];
         for (var i=0; i<idx; i++){
             propertySegments.push('Parent');
         }
         propertySegments.push('ObjectID');
 
+        if (idx < 0){
+            //something is wrong...
+        }
+
+        var operator = ">",
+            value = 0;
+
+        if (portfolioItem && portfolioItem.get('ObjectID') > 0){
+            operator = "=";
+            value = portfolioItem.get('ObjectID');
+        }
         var filters = [{
             property: propertySegments.join('.'),
-            value: portfolioItem.get('ObjectID')
+            operator: operator,
+            value: value
         }];
 
-        this.logger.log('_getUserStoryConfigs', model, idx, propertySegments, filters);
+        this.logger.log('_getUserStoryConfigs', portfolioItem, model, idx, propertySegments, filters);
         return {
             model: model,
             fetch: ['ObjectID','Defects'],
             filters: filters,
-            limit: 'Infinity',
-            listeners: {
-                scope: this,
-                load: function(records, operation){
-                    console.log('records', records, operation);
-                }
-            }
+            limit: 'Infinity'
         };
     },
     _getDefectConfig: function(userStories){
@@ -130,18 +156,13 @@ Ext.define("portfolio-item-defects", {
 
             fetch: this.defectFetch,
             filters: filters,
-            limit: 'Infinity',
-            listeners: {
-                scope: this,
-                load: function(records, operation){
-                    console.log('records', records, operation);
-                }
-            }
+            limit: 'Infinity'
         };
     },
-    _getPortfolioItemLevel: function(portfolioItem){
+    _getPortfolioItemLevel: function(){
+
         var idx = -1,
-            type = portfolioItem.get('_type').toLowerCase();
+            type = this.getSetting('selectedPortfolioType').toLowerCase();
 
         for (var i=0; i<this.portfolioItemTypes.length; i++){
             if (type === this.portfolioItemTypes[i].TypePath.toLowerCase()){
