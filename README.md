@@ -1,5 +1,14 @@
 #Portfolio Item Defects
 
+App to show all defects associated with the selected portfolio item at any level of the portfolio item's hierarchy.  Defects can be filtered using a query entered in the app settings.    
+
+![ScreenShot](/images/portfolio-item-defects.png)
+
+### Configurable Settings
+Portfolio Item Type - this determines the type of portfolio item that will be displayed in the dropdown selector.  
+Defect Query - this can be a query to filter the defects associated with the selected portfolio item (e.g. to only show defects that are not closed, enter (State != "Closed")
+in the query box.  
+
 ## Development Notes
 
 ### First Load
